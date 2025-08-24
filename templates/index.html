@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RSS Reader</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+
+        .feed-form {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .feed-form input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .feed-form button {
+            padding: 10px 20px;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .feed-form button:hover {
+            background: #2980b9;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 20px;
+        }
+
+        .feeds-panel {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            height: fit-content;
+        }
+
+        .feeds-panel h2 {
+            margin-bottom: 15px;
+            color: #2c3e50;
+        }
+
+        .feed-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .feed-item:last-child {
+            border-bottom: none;
+        }
+
+        .feed-item button {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .feed-item button:hover {
+            background: #c0392b;
+        }
+
+        .refresh-btn {
+            background: #27ae60;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-right: 5px;
+        }
+
+        .refresh-btn:hover {
+            background: #219a52;
+        }
+
+        .articles-panel {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .articles-panel h2 {
+            margin-bottom: 15px;
+            color: #2c3e50;
+        }
+
+        .filter-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .filter-controls select {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .article-item {
+            border-bottom: 1px solid #eee;
+            padding: 15px 0;
+        }
+
+        .article-item:last-child {
+            border-bottom: none;
+        }
+
+        .article-item.unread {
+            background: #f8f9fa;
+            border-left: 4px solid #3498db;
+            padding-left: 11px;
+        }
+
+        .article-title {
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 5px;
+            cursor: pointer;
+        }
+
+        .article-title:hover {
+            color: #3498db;
+        }
+
+        .article-meta {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .article-content {
+            color: #555;
+            line-height: 1.6;
+            margin-bottom: 10px;
+        }
+
+        .article-link {
+            color: #3498db;
+            text-decoration: none;
+            font-size: 14px;
+        }
+
+        .article-link:hover {
+            text-decoration: underline;
+        }
+
+        .mark-read-btn {
+            background: #f39c12;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .mark-read-btn:hover {
+            background: #e67e22;
+        }
+
+        .error-message {
+            background: #e74c3c;
+            color: white;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            display: none;
+        }
+
+        .success-message {
+            background: #27ae60;
+            color: white;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            display: none;
+        }
+
+        @media (max-width: 768px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+            
+            .feed-form {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>RSS Reader</h1>
+            <div class="feed-form">
+                <input type="text" id="feedUrl" placeholder="Enter RSS feed URL...">
+                <button onclick="addFeed()">Add Feed</button>
+            </div>
+            <div class="error-message" id="errorMessage"></div>
+            <div class="success-message" id="successMessage"></div>
+        </div>
+
+        <div class="main-content">
+            <div class="feeds-panel">
+                <h2>My Feeds</h2>
+                <div id="feedsList"></div>
+            </div>
+
+            <div class="articles-panel">
+                <h2>Articles</h2>
+                <div class="filter-controls">
+                    <select id="feedFilter" onchange="loadArticles()">
+                        <option value="">All Feeds</option>
+                    </select>
+                    <select id="unreadFilter" onchange="loadArticles()">
+                        <option value="false">All Articles</option>
+                        <option value="true">Unread Only</option>
+                    </select>
+                </div>
+                <div id="articlesList"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let feeds = [];
+        let articles = [];
+
+        async function addFeed() {
+            const url = document.getElementById('feedUrl').value.trim();
+            if (!url) {
+                showError('Please enter a feed URL');
+                return;
+            }
+
+            try {
+                const response = await fetch('/feeds', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ url: url })
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showSuccess('Feed added successfully');
+                    document.getElementById('feedUrl').value = '';
+                    loadFeeds();
+                    loadArticles();
+                } else {
+                    showError(data.error || 'Failed to add feed');
+                }
+            } catch (error) {
+                showError('Network error: ' + error.message);
+            }
+        }
+
+        async function removeFeed(feedId) {
+            try {
+                const response = await fetch(`/feeds/${feedId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    showSuccess('Feed removed successfully');
+                    loadFeeds();
+                    loadArticles();
+                } else {
+                    showError('Failed to remove feed');
+                }
+            } catch (error) {
+                showError('Network error: ' + error.message);
+            }
+        }
+
+        async function refreshFeed(feedId) {
+            try {
+                const response = await fetch(`/feeds/${feedId}/refresh`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    showSuccess('Feed refreshed successfully');
+                    loadFeeds();
+                    loadArticles();
+                } else {
+                    showError('Failed to refresh feed');
+                }
+            } catch (error) {
+                showError('Network error: ' + error.message);
+            }
+        }
+
+        async function markAsRead(articleId) {
+            try {
+                const response = await fetch(`/articles/${articleId}/read`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    loadArticles();
+                } else {
+                    showError('Failed to mark article as read');
+                }
+            } catch (error) {
+                showError('Network error: ' + error.message);
+            }
+        }
+
+        async function loadFeeds() {
+            try {
+                const response = await fetch('/feeds');
+                feeds = await response.json();
+                renderFeeds();
+                updateFeedFilter();
+            } catch (error) {
+                showError('Failed to load feeds: ' + error.message);
+            }
+        }
+
+        async function loadArticles() {
+            const feedId = document.getElementById('feedFilter').value;
+            const unreadOnly = document.getElementById('unreadFilter').value;
+            
+            let url = '/articles?';
+            if (feedId) url += `feed_id=${feedId}&`;
+            if (unreadOnly === 'true') url += `unread_only=true`;
+
+            try {
+                const response = await fetch(url);
+                articles = await response.json();
+                renderArticles();
+            } catch (error) {
+                showError('Failed to load articles: ' + error.message);
+            }
+        }
+
+        function renderFeeds() {
+            const feedsList = document.getElementById('feedsList');
+            feedsList.innerHTML = '';
+
+            feeds.forEach(feed => {
+                const feedItem = document.createElement('div');
+                feedItem.className = 'feed-item';
+                feedItem.innerHTML = `
+                    <span>${feed.title}</span>
+                    <div>
+                        <button class="refresh-btn" onclick="refreshFeed(${feed.id})">Refresh</button>
+                        <button onclick="removeFeed(${feed.id})">Remove</button>
+                    </div>
+                `;
+                feedsList.appendChild(feedItem);
+            });
+        }
+
+        function renderArticles() {
+            const articlesList = document.getElementById('articlesList');
+            articlesList.innerHTML = '';
+
+            if (articles.length === 0) {
+                articlesList.innerHTML = '<p>No articles found.</p>';
+                return;
+            }
+
+            articles.forEach(article => {
+                const articleItem = document.createElement('div');
+                articleItem.className = `article-item ${article.read_status ? '' : 'unread'}`;
+                
+                const publishedDate = article.published_date ? 
+                    new Date(article.published_date).toLocaleDateString() : 'No date';
+                
+                articleItem.innerHTML = `
+                    <div class="article-title" onclick="window.open('${article.link}', '_blank')">
+                        ${article.title}
+                    </div>
+                    <div class="article-meta">
+                        ${article.feed_title} • ${publishedDate}
+                    </div>
+                    <div class="article-content">
+                        ${article.content ? article.content.substring(0, 200) + '...' : 'No content available'}
+                    </div>
+                    <div>
+                        <a href="${article.link}" target="_blank" class="article-link">Read more</a>
+                        ${!article.read_status ? `<button class="mark-read-btn" onclick="markAsRead(${article.id})">Mark as read</button>` : ''}
+                    </div>
+                `;
+                articlesList.appendChild(articleItem);
+            });
+        }
+
+        function updateFeedFilter() {
+            const feedFilter = document.getElementById('feedFilter');
+            feedFilter.innerHTML = '<option value="">All Feeds</option>';
+            
+            feeds.forEach(feed => {
+                const option = document.createElement('option');
+                option.value = feed.id;
+                option.textContent = feed.title;
+                feedFilter.appendChild(option);
+            });
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+            }, 5000);
+        }
+
+        function showSuccess(message) {
+            const successDiv = document.getElementById('successMessage');
+            successDiv.textContent = message;
+            successDiv.style.display = 'block';
+            setTimeout(() => {
+                successDiv.style.display = 'none';
+            }, 3000);
+        }
+
+        document.getElementById('feedUrl').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                addFeed();
+            }
+        });
+
+        loadFeeds();
+        loadArticles();
+    </script>
+</body>
+</html>
