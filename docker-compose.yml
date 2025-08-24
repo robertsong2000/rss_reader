@@ -8,7 +8,7 @@ services:
     volumes:
       - ./data:/app/data
     environment:
-      - FLASK_ENV=production
+      - FLASK_ENV=development
       - DATABASE_PATH=/app/data/rss_reader.db
     restart: unless-stopped
     healthcheck:
