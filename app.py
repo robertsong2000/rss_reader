@@ -7,6 +7,9 @@ from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 import os
 import argparse
+import json
+import csv
+import io
 
 app = Flask(__name__)
 CORS(app)
@@ -220,6 +223,138 @@ def mark_article_read(article_id):
     conn.close()
     
     return jsonify({'message': 'Article marked as read'})
+
+@app.route('/feeds/export', methods=['GET'])
+def export_feeds():
+    format_type = request.args.get('format', 'json').lower()
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT url, title FROM feeds ORDER BY title')
+    feeds = cursor.fetchall()
+    conn.close()
+    
+    if format_type == 'csv':
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['Title', 'URL'])
+        for feed in feeds:
+            writer.writerow([feed['title'], feed['url']])
+        
+        output.seek(0)
+        return output.getvalue(), 200, {
+            'Content-Type': 'text/csv',
+            'Content-Disposition': 'attachment; filename=rss_feeds.csv'
+        }
+    else:
+        feeds_data = [{'title': feed['title'], 'url': feed['url']} for feed in feeds]
+        return jsonify(feeds_data)
+
+@app.route('/feeds/import', methods=['POST'])
+def import_feeds():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    
+    format_type = request.form.get('format', 'json').lower()
+    imported_count = 0
+    errors = []
+    
+    try:
+        if format_type == 'csv':
+            content = file.read().decode('utf-8')
+            csv_reader = csv.DictReader(io.StringIO(content))
+            
+            for row in csv_reader:
+                url = row.get('URL') or row.get('url') or row.get('Url')
+                title = row.get('Title') or row.get('title') or row.get('TITLE')
+                
+                if url:
+                    result = add_feed_to_db(url, title)
+                    if result['success']:
+                        imported_count += 1
+                    else:
+                        errors.append(f"{url}: {result['error']}")
+        
+        else:  # JSON format
+            content = file.read().decode('utf-8')
+            feeds_data = json.loads(content)
+            
+            if isinstance(feeds_data, dict) and 'feeds' in feeds_data:
+                feeds_data = feeds_data['feeds']
+            
+            for feed_data in feeds_data:
+                if isinstance(feed_data, dict):
+                    url = feed_data.get('url') or feed_data.get('URL')
+                    title = feed_data.get('title') or feed_data.get('title')
+                elif isinstance(feed_data, str):
+                    url = feed_data
+                    title = None
+                
+                if url:
+                    result = add_feed_to_db(url, title)
+                    if result['success']:
+                        imported_count += 1
+                    else:
+                        errors.append(f"{url}: {result['error']}")
+    
+    except Exception as e:
+        return jsonify({'error': f'Error processing file: {str(e)}'}), 400
+    
+    return jsonify({
+        'message': f'Import completed. Successfully imported {imported_count} feeds.',
+        'imported_count': imported_count,
+        'errors': errors
+    })
+
+def add_feed_to_db(url, title=None):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Check if feed already exists
+        cursor.execute('SELECT id FROM feeds WHERE url = ?', (url,))
+        if cursor.fetchone():
+            conn.close()
+            return {'success': False, 'error': 'Feed already exists'}
+        
+        # Parse feed to get title if not provided
+        if not title:
+            feed_data = parse_feed(url)
+            if not feed_data:
+                conn.close()
+                return {'success': False, 'error': 'Invalid RSS feed URL'}
+            title = feed_data['title']
+        
+        # Add feed to database
+        cursor.execute('''
+            INSERT INTO feeds (url, title, last_updated)
+            VALUES (?, ?, ?)
+        ''', (url, title, datetime.now().isoformat()))
+        
+        feed_id = cursor.lastrowid
+        
+        # If we have feed data, add articles
+        feed_data = parse_feed(url)
+        if feed_data:
+            for entry in feed_data['entries']:
+                cursor.execute('''
+                    INSERT OR IGNORE INTO articles 
+                    (feed_id, title, link, content, published_date)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (feed_id, entry['title'], entry['link'], 
+                      entry['content'], entry['published']))
+        
+        conn.commit()
+        conn.close()
+        return {'success': True, 'feed_id': feed_id}
+    
+    except Exception as e:
+        conn.close()
+        return {'success': False, 'error': str(e)}
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='RSS Reader Web Application')

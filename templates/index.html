@@ -83,6 +83,90 @@
             color: #2c3e50;
         }
 
+        .import-export-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .import-export-controls button {
+            padding: 8px 12px;
+            background: #9b59b6;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .import-export-controls button:hover {
+            background: #8e44ad;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .import-modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+
+        .modal-content {
+            background-color: white;
+            margin: 15% auto;
+            padding: 20px;
+            border-radius: 8px;
+            width: 400px;
+            max-width: 90%;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .close {
+            color: #aaa;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .close:hover {
+            color: black;
+        }
+
+        .format-selector {
+            margin-bottom: 15px;
+        }
+
+        .format-selector label {
+            margin-right: 15px;
+        }
+
+        .import-button {
+            background: #27ae60;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            width: 100%;
+        }
+
+        .import-button:hover {
+            background: #219a52;
+        }
+
         .feed-item {
             display: flex;
             justify-content: space-between;
@@ -255,6 +339,11 @@
         <div class="main-content">
             <div class="feeds-panel">
                 <h2>My Feeds</h2>
+                <div class="import-export-controls">
+                    <button onclick="showImportModal()">Import</button>
+                    <button onclick="exportFeeds('json')">Export JSON</button>
+                    <button onclick="exportFeeds('csv')">Export CSV</button>
+                </div>
                 <div id="feedsList"></div>
             </div>
 
@@ -270,6 +359,27 @@
                     </select>
                 </div>
                 <div id="articlesList"></div>
+            </div>
+        </div>
+
+        <!-- Import Modal -->
+        <div id="importModal" class="import-modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Import RSS Feeds</h3>
+                    <span class="close" onclick="closeImportModal()">&times;</span>
+                </div>
+                <div class="format-selector">
+                    <label>
+                        <input type="radio" name="format" value="json" checked> JSON
+                    </label>
+                    <label>
+                        <input type="radio" name="format" value="csv"> CSV
+                    </label>
+                </div>
+                <input type="file" id="importFile" class="file-input" accept=".json,.csv" onchange="handleFileSelect(event)">
+                <button class="import-button" onclick="document.getElementById('importFile').click()">Choose File</button>
+                <div id="importStatus" style="margin-top: 10px;"></div>
             </div>
         </div>
     </div>
@@ -480,6 +590,106 @@
 
         loadFeeds();
         loadArticles();
+    </script>
+
+    <script>
+        // Import/Export functionality
+        function showImportModal() {
+            document.getElementById('importModal').style.display = 'block';
+        }
+
+        function closeImportModal() {
+            document.getElementById('importModal').style.display = 'none';
+            document.getElementById('importFile').value = '';
+            document.getElementById('importStatus').innerHTML = '';
+        }
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                importFeeds(file);
+            }
+        }
+
+        async function importFeeds(file) {
+            const format = document.querySelector('input[name="format"]:checked').value;
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('format', format);
+
+            const statusDiv = document.getElementById('importStatus');
+            statusDiv.innerHTML = '<p>Importing feeds...</p>';
+
+            try {
+                const response = await fetch('/feeds/import', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                
+                if (response.ok) {
+                    statusDiv.innerHTML = `
+                        <p style="color: green;">${result.message}</p>
+                        <p>Imported: ${result.imported_count} feeds</p>
+                    `;
+                    if (result.errors.length > 0) {
+                        statusDiv.innerHTML += `<p style="color: orange; font-size: 12px;">Errors: ${result.errors.join(', ')}</p>`;
+                    }
+                    
+                    // Refresh feeds and articles after a short delay
+                    setTimeout(() => {
+                        loadFeeds();
+                        loadArticles();
+                        closeImportModal();
+                    }, 2000);
+                } else {
+                    statusDiv.innerHTML = `<p style="color: red;">Error: ${result.error}</p>`;
+                }
+            } catch (error) {
+                statusDiv.innerHTML = `<p style="color: red;">Network error: ${error.message}</p>`;
+            }
+        }
+
+        async function exportFeeds(format) {
+            try {
+                const response = await fetch(`/feeds/export?format=${format}`);
+                
+                if (response.ok) {
+                    if (format === 'csv') {
+                        const blob = new Blob([await response.text()], { type: 'text/csv' });
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'rss_feeds.csv';
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                    } else {
+                        const data = await response.json();
+                        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'rss_feeds.json';
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                    }
+                    showSuccess(`Feeds exported as ${format.toUpperCase()}`);
+                } else {
+                    showError('Failed to export feeds');
+                }
+            } catch (error) {
+                showError('Network error: ' + error.message);
+            }
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('importModal');
+            if (event.target === modal) {
+                closeImportModal();
+            }
+        }
     </script>
 </body>
 </html>
