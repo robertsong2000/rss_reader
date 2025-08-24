@@ -90,3 +90,7 @@ instance/
 .webassets-cache
 data/
 *.log
+
+# Environment variables
+.env
+.env.*
