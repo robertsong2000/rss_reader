@@ -175,6 +175,91 @@
             border-bottom: 1px solid #eee;
         }
 
+        .group-item {
+            margin-bottom: 15px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .group-header {
+            background: #f8f9fa;
+            padding: 10px;
+            font-weight: bold;
+            color: #2c3e50;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .group-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+
+        .group-controls {
+            display: flex;
+            gap: 5px;
+        }
+
+        .group-feed-item {
+            padding: 8px 10px;
+            border-bottom: 1px solid #f0f0f0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+        }
+
+        .group-feed-item:last-child {
+            border-bottom: none;
+        }
+
+        .ungrouped-section {
+            margin-top: 15px;
+        }
+
+        .add-group-form {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            align-items: center;
+        }
+
+        .add-group-form input {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .add-group-form button {
+            padding: 8px 12px;
+            background: #e74c3c;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .add-group-form button:hover {
+            background: #c0392b;
+        }
+
+        .group-select {
+            padding: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-right: 5px;
+        }
+
         .feed-item:last-child {
             border-bottom: none;
         }
@@ -344,6 +429,10 @@
                     <button onclick="exportFeeds('json')">Export JSON</button>
                     <button onclick="exportFeeds('csv')">Export CSV</button>
                 </div>
+                <div class="add-group-form">
+                    <input type="text" id="groupName" placeholder="New group name...">
+                    <button onclick="createGroup()">Create Group</button>
+                </div>
                 <div id="feedsList"></div>
             </div>
 
@@ -387,9 +476,13 @@
     <script>
         let feeds = [];
         let articles = [];
+        let groups = [];
 
         async function addFeed() {
             const url = document.getElementById('feedUrl').value.trim();
+            const groupId = document.getElementById('feedGroupSelect') ? 
+                           document.getElementById('feedGroupSelect').value : null;
+            
             if (!url) {
                 showError('Please enter a feed URL');
                 return;
@@ -401,7 +494,7 @@
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ url: url })
+                    body: JSON.stringify({ url: url, group_id: groupId })
                 });
 
                 const data = await response.json();
@@ -475,6 +568,7 @@
             try {
                 const response = await fetch('/feeds');
                 feeds = await response.json();
+                await loadGroups();
                 renderFeeds();
                 updateFeedFilter();
             } catch (error) {
@@ -482,12 +576,102 @@
             }
         }
 
+        async function loadGroups() {
+            try {
+                const response = await fetch('/groups');
+                groups = await response.json();
+            } catch (error) {
+                showError('Failed to load groups: ' + error.message);
+            }
+        }
+
+        async function createGroup() {
+            const name = document.getElementById('groupName').value.trim();
+            if (!name) {
+                showError('Please enter a group name');
+                return;
+            }
+
+            try {
+                const response = await fetch('/groups', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ name: name })
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showSuccess('Group created successfully');
+                    document.getElementById('groupName').value = '';
+                    loadFeeds();
+                } else {
+                    showError(data.error || 'Failed to create group');
+                }
+            } catch (error) {
+                showError('Network error: ' + error.message);
+            }
+        }
+
+        async function deleteGroup(groupId) {
+            if (!confirm('Are you sure you want to delete this group? Feeds will become ungrouped.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/groups/${groupId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    showSuccess('Group deleted successfully');
+                    loadFeeds();
+                } else {
+                    showError('Failed to delete group');
+                }
+            } catch (error) {
+                showError('Network error: ' + error.message);
+            }
+        }
+
+        async function assignFeedToGroup(feedId, groupId) {
+            try {
+                const response = await fetch(`/feeds/${feedId}/group`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ group_id: groupId })
+                });
+
+                if (response.ok) {
+                    showSuccess('Feed assigned to group');
+                    loadFeeds();
+                } else {
+                    const data = await response.json();
+                    showError(data.error || 'Failed to assign feed to group');
+                }
+            } catch (error) {
+                showError('Network error: ' + error.message);
+            }
+        }
+
         async function loadArticles() {
-            const feedId = document.getElementById('feedFilter').value;
+            const filterValue = document.getElementById('feedFilter').value;
             const unreadOnly = document.getElementById('unreadFilter').value;
             
             let url = '/articles?';
-            if (feedId) url += `feed_id=${feedId}&`;
+            
+            // Handle group filtering
+            if (filterValue && filterValue.startsWith('group_')) {
+                const groupId = filterValue.replace('group_', '');
+                url += `group_id=${groupId}&`;
+            } else if (filterValue) {
+                url += `feed_id=${filterValue}&`;
+            }
+            
             if (unreadOnly === 'true') url += `unread_only=true`;
 
             try {
@@ -503,18 +687,116 @@
             const feedsList = document.getElementById('feedsList');
             feedsList.innerHTML = '';
 
+            // Group feeds by group
+            const groupedFeeds = {};
+            const ungroupedFeeds = [];
+
             feeds.forEach(feed => {
-                const feedItem = document.createElement('div');
-                feedItem.className = 'feed-item';
-                feedItem.innerHTML = `
-                    <span>${feed.title}</span>
-                    <div>
-                        <button class="refresh-btn" onclick="refreshFeed(${feed.id})">Refresh</button>
-                        <button onclick="removeFeed(${feed.id})">Remove</button>
-                    </div>
-                `;
-                feedsList.appendChild(feedItem);
+                if (feed.group_id) {
+                    if (!groupedFeeds[feed.group_id]) {
+                        groupedFeeds[feed.group_id] = [];
+                    }
+                    groupedFeeds[feed.group_id].push(feed);
+                } else {
+                    ungroupedFeeds.push(feed);
+                }
             });
+
+            // Render grouped feeds
+            groups.forEach(group => {
+                if (groupedFeeds[group.id]) {
+                    const groupDiv = document.createElement('div');
+                    groupDiv.className = 'group-item';
+                    
+                    const groupFeedsHtml = groupedFeeds[group.id].map(feed => `
+                        <div class="group-feed-item">
+                            <span>${feed.title}</span>
+                            <div>
+                                <select class="group-select" onchange="assignFeedToGroup(${feed.id}, this.value)">
+                                    <option value="">Move to...</option>
+                                    ${groups.map(g => `<option value="${g.id}" ${g.id === feed.group_id ? 'selected' : ''}>${g.name}</option>`).join('')}
+                                    <option value="">Ungrouped</option>
+                                </select>
+                                <button class="refresh-btn" onclick="refreshFeed(${feed.id})">Refresh</button>
+                                <button onclick="removeFeed(${feed.id})">Remove</button>
+                            </div>
+                        </div>
+                    `).join('');
+
+                    groupDiv.innerHTML = `
+                        <div class="group-header">
+                            <span>
+                                <span class="group-color" style="background-color: ${group.color}"></span>
+                                ${group.name}
+                            </span>
+                            <div class="group-controls">
+                                <button class="refresh-btn" onclick="refreshGroupFeeds(${group.id})">Refresh All</button>
+                                <button onclick="deleteGroup(${group.id})">Delete</button>
+                            </div>
+                        </div>
+                        ${groupFeedsHtml}
+                    `;
+                    feedsList.appendChild(groupDiv);
+                }
+            });
+
+            // Render ungrouped feeds
+            if (ungroupedFeeds.length > 0) {
+                const ungroupedDiv = document.createElement('div');
+                ungroupedDiv.className = 'ungrouped-section';
+                
+                const ungroupedHtml = ungroupedFeeds.map(feed => `
+                    <div class="group-feed-item">
+                        <span>${feed.title}</span>
+                        <div>
+                            <select class="group-select" onchange="assignFeedToGroup(${feed.id}, this.value)">
+                                <option value="">Move to...</option>
+                                ${groups.map(g => `<option value="${g.id}">${g.name}</option>`).join('')}
+                            </select>
+                            <button class="refresh-btn" onclick="refreshFeed(${feed.id})">Refresh</button>
+                            <button onclick="removeFeed(${feed.id})">Remove</button>
+                        </div>
+                    </div>
+                `).join('');
+
+                ungroupedDiv.innerHTML = `
+                    <div class="group-header">
+                        <span>Ungrouped Feeds</span>
+                    </div>
+                    ${ungroupedHtml}
+                `;
+                feedsList.appendChild(ungroupedDiv);
+            }
+
+            // Update feed form to include group selection
+            updateFeedForm();
+        }
+
+        function updateFeedForm() {
+            const feedForm = document.querySelector('.feed-form');
+            const existingSelect = document.getElementById('feedGroupSelect');
+            
+            if (existingSelect) {
+                existingSelect.remove();
+            }
+
+            if (groups.length > 0) {
+                const select = document.createElement('select');
+                select.id = 'feedGroupSelect';
+                select.innerHTML = `
+                    <option value="">No Group</option>
+                    ${groups.map(g => `<option value="${g.id}">${g.name}</option>`).join('')}
+                `;
+                feedForm.insertBefore(select, feedForm.lastElementChild);
+            }
+        }
+
+        async function refreshGroupFeeds(groupId) {
+            const groupFeeds = feeds.filter(feed => feed.group_id == groupId);
+            for (const feed of groupFeeds) {
+                await refreshFeed(feed.id);
+            }
+            showSuccess(`Refreshed ${groupFeeds.length} feeds in group`);
         }
 
         function renderArticles() {
@@ -556,10 +838,19 @@
             const feedFilter = document.getElementById('feedFilter');
             feedFilter.innerHTML = '<option value="">All Feeds</option>';
             
+            // Add group options
+            groups.forEach(group => {
+                const option = document.createElement('option');
+                option.value = `group_${group.id}`;
+                option.textContent = `📁 ${group.name}`;
+                feedFilter.appendChild(option);
+            });
+            
+            // Add individual feed options
             feeds.forEach(feed => {
                 const option = document.createElement('option');
                 option.value = feed.id;
-                option.textContent = feed.title;
+                option.textContent = `  ${feed.title}`;
                 feedFilter.appendChild(option);
             });
         }

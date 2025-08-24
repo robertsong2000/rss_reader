@@ -25,16 +25,47 @@ def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     
+    # Create feed_groups table if it doesn't exist
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS feed_groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            description TEXT,
+            color TEXT DEFAULT '#3498db',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Create feeds table if it doesn't exist
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS feeds (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             url TEXT NOT NULL UNIQUE,
             title TEXT NOT NULL,
+            group_id INTEGER,
             last_updated TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (group_id) REFERENCES feed_groups (id)
         )
     ''')
     
+    # Check if feeds table has group_id column and add it if missing
+    cursor.execute('PRAGMA table_info(feeds)')
+    columns = [column[1] for column in cursor.fetchall()]
+    
+    if 'group_id' not in columns:
+        # Add group_id column to feeds table
+        cursor.execute('ALTER TABLE feeds ADD COLUMN group_id INTEGER')
+        # Add foreign key constraint
+        cursor.execute('''
+            CREATE TRIGGER IF NOT EXISTS feeds_group_id_fk 
+            AFTER INSERT ON feeds
+            BEGIN
+                UPDATE feeds SET group_id = NULL WHERE group_id IS NULL;
+            END
+        ''')
+    
+    # Create articles table if it doesn't exist
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS articles (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,9 +145,27 @@ def index():
 
 @app.route('/feeds', methods=['GET'])
 def get_feeds():
+    group_id = request.args.get('group_id')
+    
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM feeds ORDER BY created_at DESC')
+    
+    if group_id:
+        cursor.execute('''
+            SELECT f.*, fg.name as group_name, fg.color as group_color 
+            FROM feeds f 
+            LEFT JOIN feed_groups fg ON f.group_id = fg.id 
+            WHERE f.group_id = ? 
+            ORDER BY f.created_at DESC
+        ''', (group_id,))
+    else:
+        cursor.execute('''
+            SELECT f.*, fg.name as group_name, fg.color as group_color 
+            FROM feeds f 
+            LEFT JOIN feed_groups fg ON f.group_id = fg.id 
+            ORDER BY f.created_at DESC
+        ''')
+    
     feeds = cursor.fetchall()
     conn.close()
     
@@ -126,6 +175,7 @@ def get_feeds():
 def add_feed():
     data = request.get_json()
     url = data.get('url')
+    group_id = data.get('group_id')
     
     if not url:
         return jsonify({'error': 'URL is required'}), 400
@@ -139,9 +189,9 @@ def add_feed():
     
     try:
         cursor.execute('''
-            INSERT INTO feeds (url, title, last_updated)
-            VALUES (?, ?, ?)
-        ''', (url, feed_data['title'], datetime.now().isoformat()))
+            INSERT INTO feeds (url, title, group_id, last_updated)
+            VALUES (?, ?, ?, ?)
+        ''', (url, feed_data['title'], group_id, datetime.now().isoformat()))
         
         feed_id = cursor.lastrowid
         
@@ -174,6 +224,117 @@ def remove_feed(feed_id):
     
     return jsonify({'message': 'Feed removed successfully'})
 
+# Feed Groups API
+@app.route('/groups', methods=['GET'])
+def get_groups():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM feed_groups ORDER BY name')
+    groups = cursor.fetchall()
+    conn.close()
+    
+    return jsonify([dict(group) for group in groups])
+
+@app.route('/groups', methods=['POST'])
+def create_group():
+    data = request.get_json()
+    name = data.get('name')
+    description = data.get('description')
+    color = data.get('color', '#3498db')
+    
+    if not name:
+        return jsonify({'error': 'Group name is required'}), 400
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute('''
+            INSERT INTO feed_groups (name, description, color)
+            VALUES (?, ?, ?)
+        ''', (name, description, color))
+        
+        group_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'message': 'Group created successfully', 'group_id': group_id}), 201
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({'error': 'Group name already exists'}), 409
+
+@app.route('/groups/<int:group_id>', methods=['PUT'])
+def update_group(group_id):
+    data = request.get_json()
+    name = data.get('name')
+    description = data.get('description')
+    color = data.get('color')
+    
+    if not name:
+        return jsonify({'error': 'Group name is required'}), 400
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute('''
+            UPDATE feed_groups 
+            SET name = ?, description = ?, color = ?
+            WHERE id = ?
+        ''', (name, description, color, group_id))
+        
+        if cursor.rowcount == 0:
+            conn.close()
+            return jsonify({'error': 'Group not found'}), 404
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'message': 'Group updated successfully'})
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({'error': 'Group name already exists'}), 409
+
+@app.route('/groups/<int:group_id>', methods=['DELETE'])
+def delete_group(group_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Move feeds to ungrouped (set group_id to NULL)
+    cursor.execute('UPDATE feeds SET group_id = NULL WHERE group_id = ?', (group_id,))
+    cursor.execute('DELETE FROM feed_groups WHERE id = ?', (group_id,))
+    
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'message': 'Group deleted successfully'})
+
+@app.route('/feeds/<int:feed_id>/group', methods=['PUT'])
+def assign_feed_to_group(feed_id):
+    data = request.get_json()
+    group_id = data.get('group_id')
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    if group_id:
+        # Verify group exists
+        cursor.execute('SELECT id FROM feed_groups WHERE id = ?', (group_id,))
+        if not cursor.fetchone():
+            conn.close()
+            return jsonify({'error': 'Group not found'}), 404
+    
+    cursor.execute('UPDATE feeds SET group_id = ? WHERE id = ?', (group_id, feed_id))
+    
+    if cursor.rowcount == 0:
+        conn.close()
+        return jsonify({'error': 'Feed not found'}), 404
+    
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'message': 'Feed assigned to group successfully'})
+
 @app.route('/feeds/<int:feed_id>/refresh', methods=['POST'])
 def refresh_feed(feed_id):
     update_feed(feed_id)
@@ -182,6 +343,7 @@ def refresh_feed(feed_id):
 @app.route('/articles', methods=['GET'])
 def get_articles():
     feed_id = request.args.get('feed_id')
+    group_id = request.args.get('group_id')
     unread_only = request.args.get('unread_only', 'false').lower() == 'true'
     
     conn = get_db_connection()
@@ -198,6 +360,9 @@ def get_articles():
     if feed_id:
         query += ' AND a.feed_id = ?'
         params.append(feed_id)
+    elif group_id:
+        query += ' AND f.group_id = ?'
+        params.append(group_id)
     
     if unread_only:
         query += ' AND a.read_status = 0'
