@@ -88,3 +88,5 @@ pids
 rss_reader.db
 instance/
 .webassets-cache
+data/
+*.log

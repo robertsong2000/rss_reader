@@ -11,7 +11,7 @@ import argparse
 app = Flask(__name__)
 CORS(app)
 
-DATABASE = 'rss_reader.db'
+DATABASE = os.getenv('DATABASE_PATH', 'rss_reader.db')
 
 def get_db_connection():
     conn = sqlite3.connect(DATABASE)
