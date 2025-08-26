@@ -367,7 +367,7 @@ def get_articles():
     if unread_only:
         query += ' AND a.read_status = 0'
     
-    query += ' ORDER BY a.published_date DESC LIMIT 100'
+    query += ' ORDER BY a.created_at DESC LIMIT 100'
     
     cursor.execute(query, params)
     articles = cursor.fetchall()
